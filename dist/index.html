@@ -7,8 +7,8 @@
   <meta name="description" content="Hold a palm for confetti or a peace sign for balloons.">
   <title>Handparty</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%237452e9'/%3E%3Ctext x='10' y='47' font-size='43'%3E✋%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css?v=3">
-  <script src="app.js?v=3" defer></script>
+  <link rel="stylesheet" href="styles.css?v=4">
+  <script src="app.js?v=4" defer></script>
 </head>
 <body>
   <svg class="svg-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -60,6 +60,11 @@
     <p class="help-moves">✋ Confetti<br>✌️ Balloons</p>
     <p>Lower your hand to go again.<br>Or tap a move.</p>
     <p class="dialog-privacy">Camera only. Stays on your device.</p>
+    <details id="recognitionDetails" hidden>
+      <summary>Recognition details</summary>
+      <p id="recognitionState">Camera off</p>
+      <pre id="recognitionError"></pre>
+    </details>
     <button id="gotItButton" class="primary-button">Got it</button>
   </dialog>
 </body>

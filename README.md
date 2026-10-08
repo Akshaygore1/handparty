@@ -23,6 +23,7 @@ The workflow in `.github/workflows/deploy.yml` publishes `dist` on every push to
 - MediaPipe Tasks Vision 0.10.32 and the Google Gesture Recognizer float16 model are bundled in `dist/vendor`.
 - Official API reference: https://developers.google.com/edge/mediapipe/solutions/vision/gesture_recognizer/web_js
 - Camera and recognition failures keep manual reaction controls usable.
+- The recognizer receives an explicit worker canvas. Camera frames are cropped and resized through an HTML canvas before transfer. Loading allows 90 seconds on slower connections; stalled frames time out after 20 seconds. Recognition errors are available under `?` → Recognition details.
 - Gesture hold time: 850ms. Confidence threshold: 0.65. Return to a neutral gesture for 450ms to rearm.
 - Mirroring, camera stop, clearing reactions, fullscreen, responsive layout, and reduced-motion effects are included.
 - The camera fills the available screen, with large reaction buttons and compact controls below it. Phone safe areas and landscape layouts are supported; recognition uses the same crop as the visible preview.

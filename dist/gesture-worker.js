@@ -9,18 +9,20 @@ self.onmessage = async ({data}) => {
     try {
       const files = await vision.FilesetResolver.forVisionTasks(new URL('./vendor/wasm', self.location.href).href);
       recognizer = await vision.GestureRecognizer.createFromOptions(files, {
+        // Avoid MediaPipe's browser-name check falling back to document in a worker.
+        canvas: new OffscreenCanvas(1,1),
         baseOptions: {modelAssetPath:new URL('./vendor/gesture_recognizer.task',self.location.href).href,delegate:'CPU'},
         runningMode:'VIDEO',numHands:2,
         minHandDetectionConfidence:0.6,minHandPresenceConfidence:0.6,minTrackingConfidence:0.6
       });
       self.postMessage({type:'ready'});
-    } catch (error) { self.postMessage({type:'error',message:String(error)}); }
+    } catch (error) { self.postMessage({type:'error',stage:'init',message:String(error)}); }
   } else if (data.type === 'frame') {
     try {
       const result = recognizer.recognizeForVideo(data.bitmap,data.timestamp);
       const gestures = result.gestures.map(hand => hand[0]).filter(Boolean);
-      self.postMessage({type:'result',gestures,timestamp:data.timestamp});
-    } catch (error) {self.postMessage({type:'error',message:String(error)});}
+      self.postMessage({type:'result',gestures,handCount:result.landmarks.length,timestamp:data.timestamp});
+    } catch (error) {self.postMessage({type:'error',stage:'frame',message:String(error)});}
     finally {data.bitmap.close();}
   }
 };

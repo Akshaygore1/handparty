@@ -83,6 +83,10 @@ dialog p { font-size: 16px; line-height: 1.6; color: var(--muted); }
 dialog .help-moves { color: #35303f; line-height: 2; font-weight: 600; }
 dialog .dialog-privacy { margin: 24px 0; font-size: 14px; }
 dialog .primary-button { width: 100%; }
+dialog details { margin: 20px 0; font-size: 14px; }
+dialog summary { min-height: 44px; padding: 12px 0; cursor: pointer; }
+dialog details p { font-size: 14px; }
+dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; }
 .dialog-close { position: absolute; top: 4px; right: 4px; width: 44px; height: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); font-size: 26px; }
 button:active { transform: scale(.97); }
 @media (hover: hover) {

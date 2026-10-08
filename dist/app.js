@@ -2,9 +2,10 @@
 const $ = id => document.getElementById(id);
 const video = $('video'), stage = $('stage'), canvas = $('effects'), ctx = canvas.getContext('2d');
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const frameCanvas = document.createElement('canvas'), frameContext = frameCanvas.getContext('2d', {alpha:false});
 let stream = null, phase = 'idle', cameraSession = 0;
 let worker = null, detectorPromise = null, cancelDetector = null, visionReady = false;
-let frameTimer = 0, frameInFlight = false, lastVideoTime = -1, candidate = '', candidateSince = 0, armed = true, absentSince = 0;
+let frameTimer = 0, frameTimeout = 0, frameInFlight = false, lastVideoTime = -1, candidate = '', candidateSince = 0, armed = true, absentSince = 0;
 let particles = [], animation = 0, lastDrawTime = 0, toastTimer = 0, activeTimer = 0;
 let width = 0, height = 0;
 
@@ -14,6 +15,17 @@ function resetGesture() {
   $('holdTrack').hidden = true; $('holdProgress').style.width = '0%';
 }
 function tracking(text) { $('trackingText').textContent = text; }
+function recognitionState(text) { $('recognitionState').textContent = text; }
+function recognitionFailure(error, step) {
+  resetGesture();
+  recognitionState(`Failed during ${step}.`);
+  $('recognitionError').textContent = String(error?.message || error).slice(0,2000);
+  $('recognitionDetails').hidden = false;
+  const message = error?.message === 'unsupported' ? 'Update your browser for gestures.'
+    : error?.message === 'timeout' ? 'Loading timed out. Toggle gestures to retry.'
+    : 'Gestures unavailable. Open ? for details.';
+  tracking(message);
+}
 function setPhase(next) {
   phase = next;
   const live = next === 'live';
@@ -67,45 +79,56 @@ async function startCamera() {
 function stopCamera(message = 'Hold ✋ or ✌️ to play') {
   ++cameraSession;
   clearTimeout(frameTimer);
+  clearTimeout(frameTimeout);
   stream?.getTracks().forEach(track => track.stop());
   stream = null; video.srcObject = null;
   cancelDetector?.(); cancelDetector = null;
   worker?.terminate(); worker = null; detectorPromise = null; visionReady = false;
   frameInFlight = false; resetGesture(); setPhase('idle');
+  recognitionState('Camera off');
   $('cameraMessage').textContent = message;
 }
 
 function loadDetector() {
   if (detectorPromise) return detectorPromise;
-  if (!window.Worker || !window.createImageBitmap || !window.OffscreenCanvas) return Promise.reject(new Error('unsupported'));
+  if (!window.Worker || !window.createImageBitmap || !window.OffscreenCanvas || !frameContext) return Promise.reject(new Error('unsupported'));
+  let activeWorker;
+  try { activeWorker = new Worker('gesture-worker.js?v=4'); }
+  catch (error) { return Promise.reject(error); }
+  worker = activeWorker;
   detectorPromise = new Promise((resolve,reject) => {
-    const activeWorker = new Worker('gesture-worker.js');
-    worker = activeWorker;
     let settled = false;
-    const timeout = setTimeout(() => fail(new Error('timeout')), 30000);
+    const timeout = setTimeout(() => fail(new Error('timeout')), 90000);
     function fail(error) {
       clearTimeout(timeout);
-      if (worker === activeWorker) { worker = null; visionReady = false; detectorPromise = null; frameInFlight = false; }
+      const current = worker === activeWorker;
+      if (current) {
+        clearTimeout(frameTimer); clearTimeout(frameTimeout);
+        worker = null; visionReady = false; detectorPromise = null; frameInFlight = false;
+      }
       activeWorker.terminate();
-      if (!settled) { settled = true; cancelDetector = null; reject(error); }
-      else if (phase === 'live' && $('gestureToggle').checked) {
-        resetGesture(); tracking('Toggle gestures to retry, or tap a move.');
+      if (!settled) { settled = true; if (current) cancelDetector = null; reject(error); }
+      else if (current && phase === 'live' && $('gestureToggle').checked) {
+        recognitionFailure(error,error.stage || 'recognition');
       }
     }
     cancelDetector = () => fail(new Error('cancelled'));
     activeWorker.onmessage = ({data}) => {
       if (worker !== activeWorker) return;
       if (data.type === 'ready') {
-        clearTimeout(timeout); settled = true; cancelDetector = null; visionReady = true; resolve();
+        clearTimeout(timeout); settled = true; cancelDetector = null; visionReady = true;
+        recognitionState('Model ready. Waiting for camera frames.'); resolve();
       } else if (data.type === 'result') {
         frameInFlight = false;
+        clearTimeout(frameTimeout);
+        recognitionState(data.handCount ? 'Running. Hand detected.' : 'Running. No hand detected.');
         if (phase === 'live' && $('gestureToggle').checked) {
-          processGesture(data.gestures,data.timestamp);
+          processGesture(data.gestures,data.timestamp,data.handCount);
           scheduleFrame(cameraSession);
         }
-      } else if (data.type === 'error') fail(new Error(data.message));
+      } else if (data.type === 'error') fail(Object.assign(new Error(data.message),{stage:data.stage}));
     };
-    activeWorker.onerror = () => fail(new Error('worker'));
+    activeWorker.onerror = event => fail(new Error(event.message || 'Worker could not start.'));
     activeWorker.postMessage({type:'init'});
   });
   return detectorPromise;
@@ -113,6 +136,9 @@ function loadDetector() {
 
 async function enableRecognition(session) {
   tracking('Loading gestures…');
+  recognitionState('Loading the recognition model.');
+  $('recognitionError').textContent = '';
+  $('recognitionDetails').hidden = true;
   try {
     await loadDetector();
     if (session !== cameraSession || phase !== 'live' || !$('gestureToggle').checked) return;
@@ -120,7 +146,7 @@ async function enableRecognition(session) {
     scheduleFrame(session);
   } catch (error) {
     if (session !== cameraSession || phase !== 'live' || !$('gestureToggle').checked) return;
-    tracking('Toggle gestures to retry, or tap a move.');
+    recognitionFailure(error,'model loading');
   }
 }
 
@@ -135,34 +161,50 @@ async function sendFrame(session) {
   lastVideoTime = video.currentTime;
   const activeWorker = worker;
   frameInFlight = true;
+  frameTimeout = setTimeout(() => {
+    if (session !== cameraSession || worker !== activeWorker) return;
+    clearTimeout(frameTimer);
+    activeWorker.terminate(); worker = null; detectorPromise = null;
+    frameInFlight = false; visionReady = false;
+    if (phase === 'live' && $('gestureToggle').checked) recognitionFailure(new Error('No response from the recognizer within 20 seconds.'),'frame processing');
+  },20000);
   try {
     // Match the centered object-fit: cover preview, including after phone rotation.
     const previewScale = Math.max(width/video.videoWidth,height/video.videoHeight);
     const cropWidth = Math.min(video.videoWidth,width/previewScale);
     const cropHeight = Math.min(video.videoHeight,height/previewScale);
     const bitmapScale = 480/Math.max(cropWidth,cropHeight);
-    const bitmap = await createImageBitmap(video,
-      (video.videoWidth-cropWidth)/2,(video.videoHeight-cropHeight)/2,cropWidth,cropHeight,
-      {resizeWidth:Math.max(1,Math.round(cropWidth*bitmapScale)),resizeHeight:Math.max(1,Math.round(cropHeight*bitmapScale))});
-    if (session !== cameraSession || worker !== activeWorker || !$('gestureToggle').checked) {bitmap.close(); if(worker === activeWorker) frameInFlight=false; return;}
+    const frameWidth = Math.max(1,Math.round(cropWidth*bitmapScale));
+    const frameHeight = Math.max(1,Math.round(cropHeight*bitmapScale));
+    if (frameCanvas.width !== frameWidth) frameCanvas.width = frameWidth;
+    if (frameCanvas.height !== frameHeight) frameCanvas.height = frameHeight;
+    // Capture and resize through a regular canvas instead of a video bitmap overload.
+    frameContext.drawImage(video,(video.videoWidth-cropWidth)/2,(video.videoHeight-cropHeight)/2,cropWidth,cropHeight,0,0,frameWidth,frameHeight);
+    const bitmap = await createImageBitmap(frameCanvas);
+    if (session !== cameraSession || worker !== activeWorker || !$('gestureToggle').checked) {
+      bitmap.close();
+      if(worker === activeWorker) {frameInFlight=false;clearTimeout(frameTimeout);}
+      return;
+    }
     activeWorker.postMessage({type:'frame',bitmap,timestamp:performance.now()},[bitmap]);
   } catch (error) {
-    if (session === cameraSession && phase === 'live') {
+    if (session === cameraSession && worker === activeWorker && phase === 'live') {
       frameInFlight = false; visionReady = false; resetGesture();
-      tracking('Toggle gestures to retry, or tap a move.');
+      clearTimeout(frameTimer); clearTimeout(frameTimeout);
+      recognitionFailure(error,'frame capture');
       worker?.terminate(); worker = null; detectorPromise = null;
     }
   }
 }
 
-function processGesture(gestures, now) {
+function processGesture(gestures, now, handCount) {
   const supported = gestures.filter(g => g.score >= .65 && ['Open_Palm','Victory'].includes(g.categoryName)).sort((a,b) => b.score-a.score);
   const gesture = supported[0]?.categoryName || '';
   if (!gesture) {
     candidate = ''; candidateSince = 0; $('holdTrack').hidden = true;
     if (!absentSince) absentSince = now;
     if (now-absentSince >= 450) armed = true;
-    tracking(armed ? 'Hold ✋ or ✌️' : 'Lower your hand');
+    tracking(armed ? (handCount ? 'Try ✋ or ✌️' : 'Show your whole hand') : 'Lower your hand');
     return;
   }
   absentSince = 0;
@@ -318,7 +360,7 @@ $('gestureToggle').addEventListener('change',() => {
   clearTimeout(frameTimer);resetGesture();
   if (phase !== 'live') return;
   if ($('gestureToggle').checked) enableRecognition(cameraSession);
-  else tracking('Gestures paused. Tap a move.');
+  else {tracking('Gestures paused. Tap a move.');recognitionState('Gestures paused.');}
 });
 const exitFullscreen = document.createElement('button');
 exitFullscreen.className='fullscreen-exit';exitFullscreen.textContent='Close';exitFullscreen.setAttribute('aria-label','Exit fullscreen');exitFullscreen.hidden=true;
