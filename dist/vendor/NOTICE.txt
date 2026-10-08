@@ -1,0 +1,13 @@
+Handparty bundles MediaPipe Tasks Vision version 0.10.32, copyright Google LLC,
+licensed under Apache License 2.0. The unmodified vision_bundle.js file is the
+package's CommonJS distribution, loaded with an exports shim in the classic
+Web Worker. WebAssembly runtime files come from the same package.
+
+Package: https://www.npmjs.com/package/@mediapipe/tasks-vision/v/0.10.32
+Source: https://github.com/google-ai-edge/mediapipe
+
+The Google MediaPipe Gesture Recognizer float16/1 task model is bundled from:
+https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task
+
+API documentation:
+https://developers.google.com/edge/mediapipe/solutions/vision/gesture_recognizer/web_js
